@@ -1,12 +1,1173 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Quick Box Dashboard</title>
-</head>
-<body>
-  <h1>Quick Box Dashboard is Live</h1>
-  <p>Your Vercel deployment is working correctly now.</p>
-</body>
-</html>
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  ChefHat, Database, Calculator, FileText, Plus, Trash2, X, Save, Printer, 
+  Cloud, CloudOff, CheckCircle2, Truck, History, Download, List, Receipt, 
+  MapPin, Phone, User, Clock, Check, Navigation, Menu, Store
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
+
+// --- FIREBASE SETUP ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'quick-box-mega-id';
+
+// --- SHARED HELPERS ---
+const convertQuantity = (qty, fromUnit, toUnit) => {
+  if (fromUnit === toUnit) return qty;
+  if (fromUnit === 'g' && toUnit === 'kg') return qty / 1000;
+  if (fromUnit === 'kg' && toUnit === 'g') return qty * 1000;
+  if (fromUnit === 'ml' && toUnit === 'L') return qty / 1000;
+  if (fromUnit === 'L' && toUnit === 'ml') return qty * 1000;
+  return qty;
+};
+
+const getCompatibleUnits = (baseUnit) => {
+  if (['kg', 'g'].includes(baseUnit)) return ['kg', 'g'];
+  if (['L', 'ml'].includes(baseUnit)) return ['L', 'ml'];
+  if (baseUnit === 'dozen') return ['dozen'];
+  return ['pc']; 
+};
+
+const getNextInvoiceNo = (invList) => {
+  if (!invList || invList.length === 0) return 'INV-1001';
+  let maxId = 1000;
+  invList.forEach(inv => {
+    const numMatch = inv.invoiceNo.match(/\d+$/);
+    if (numMatch) {
+       const num = parseInt(numMatch[0], 10);
+       if (num > maxId) maxId = num;
+    }
+  });
+  return `INV-${maxId + 1}`;
+};
+
+const generateOrderId = () => `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
+
+// --- DEFAULT DATA ---
+const defaultIngredients = [
+  { id: 1, name: 'Almond', unit: 'kg', price: 880 },
+  { id: 2, name: 'Aluminum Foil / Packaging', unit: 'pc', price: 6 },
+  { id: 3, name: 'Banana Leaf / Plate', unit: 'pc', price: 10 },
+  { id: 4, name: 'Basmati Rice', unit: 'kg', price: 110 },
+  { id: 5, name: 'Bay Leaf', unit: 'kg', price: 280 },
+  { id: 6, name: 'Beetroot', unit: 'kg', price: 35 },
+  { id: 7, name: 'Biryani Masala', unit: 'kg', price: 550 },
+  { id: 8, name: 'Black Pepper Balls', unit: 'kg', price: 680 },
+  { id: 9, name: 'Bottle Gourd', unit: 'kg', price: 30 },
+  { id: 10, name: 'Bread Crumbs', unit: 'kg', price: 120 },
+  { id: 11, name: 'Brinjal (Eggplant)', unit: 'kg', price: 45 },
+  { id: 12, name: 'Broad Beans', unit: 'kg', price: 60 },
+  { id: 13, name: 'Butter', unit: 'kg', price: 520 },
+  { id: 14, name: 'Cabbage', unit: 'kg', price: 35 },
+  { id: 15, name: 'Capsicum', unit: 'kg', price: 60 },
+  { id: 16, name: 'Cardamom', unit: 'kg', price: 2400 },
+  { id: 17, name: 'Carrot', unit: 'kg', price: 40 },
+  { id: 18, name: 'Cashew', unit: 'kg', price: 820 },
+  { id: 19, name: 'Cashew Nut', unit: 'kg', price: 820 },
+  { id: 20, name: 'Cauliflower', unit: 'kg', price: 45 },
+  { id: 21, name: 'Chana Dal', unit: 'kg', price: 95 },
+  { id: 22, name: 'Chicken', unit: 'kg', price: 240 },
+  { id: 23, name: 'Chicken 65 Masala', unit: 'kg', price: 450 },
+  { id: 24, name: 'Cinnamon Stick', unit: 'kg', price: 780 },
+  { id: 25, name: 'Cloves', unit: 'kg', price: 1200 },
+  { id: 26, name: 'Cluster Beans', unit: 'kg', price: 50 },
+  { id: 27, name: 'Coconut', unit: 'kg', price: 55 },
+  { id: 28, name: 'Coconut Milk', unit: 'L', price: 95 },
+  { id: 29, name: 'Coriander Leaves', unit: 'kg', price: 80 },
+  { id: 30, name: 'Coriander Powder', unit: 'kg', price: 220 },
+  { id: 31, name: 'Corn Flour', unit: 'kg', price: 70 },
+  { id: 32, name: 'Cumin Powder / Seeds', unit: 'kg', price: 480 },
+  { id: 33, name: 'Curd / Yogurt', unit: 'L', price: 60 },
+  { id: 34, name: 'Curry Leaves', unit: 'kg', price: 120 },
+  { id: 35, name: 'Curry Powder', unit: 'kg', price: 300 },
+  { id: 36, name: 'Drumstick', unit: 'kg', price: 60 },
+  { id: 37, name: 'Egg', unit: 'dozen', price: 75 },
+  { id: 38, name: 'Fennel Seeds', unit: 'kg', price: 420 },
+  { id: 39, name: 'Fenugreek Seeds', unit: 'kg', price: 180 },
+  { id: 40, name: 'Field Beans (Mochai)', unit: 'kg', price: 70 },
+  { id: 41, name: 'Fish (Finger Cut)', unit: 'kg', price: 450 },
+  { id: 42, name: 'Fish (Nethili)', unit: 'kg', price: 320 },
+  { id: 43, name: 'Fish (Vanjaram)', unit: 'kg', price: 720 },
+  { id: 44, name: 'Food Colour', unit: 'g', price: 2 },
+  { id: 45, name: 'French Beans', unit: 'kg', price: 55 },
+  { id: 46, name: 'Garam Masala', unit: 'kg', price: 600 },
+  { id: 47, name: 'Garlic', unit: 'kg', price: 160 },
+  { id: 48, name: 'Ghee', unit: 'L', price: 620 },
+  { id: 49, name: 'Gingelly Oil', unit: 'L', price: 260 },
+  { id: 50, name: 'Ginger', unit: 'kg', price: 120 },
+  { id: 51, name: 'Green Chili', unit: 'kg', price: 90 },
+  { id: 52, name: 'Green Gram', unit: 'kg', price: 110 },
+  { id: 53, name: 'Green Peas', unit: 'kg', price: 80 },
+  { id: 54, name: 'Jaggery', unit: 'kg', price: 55 },
+  { id: 55, name: 'Kulambu Masala', unit: 'kg', price: 380 },
+  { id: 56, name: 'Ladies Finger (Okra)', unit: 'kg', price: 50 },
+  { id: 57, name: 'Lemon', unit: 'kg', price: 90 },
+  { id: 58, name: 'Lemon Juice', unit: 'L', price: 70 },
+  { id: 59, name: 'Mace', unit: 'kg', price: 1600 },
+  { id: 60, name: 'Maida', unit: 'kg', price: 45 },
+  { id: 61, name: 'Milkmaid', unit: 'kg', price: 190 },
+  { id: 62, name: 'Mint Leaves (Pudina)', unit: 'kg', price: 70 },
+  { id: 63, name: 'Mustard Seeds', unit: 'kg', price: 140 },
+  { id: 64, name: 'Mutton', unit: 'kg', price: 820 },
+  { id: 65, name: 'Nandu (Crab)', unit: 'kg', price: 650 },
+  { id: 66, name: 'Nutmeg', unit: 'kg', price: 900 },
+  { id: 67, name: 'Onion', unit: 'kg', price: 35 },
+  { id: 68, name: 'Paneer', unit: 'kg', price: 380 },
+  { id: 69, name: 'Pepper Powder', unit: 'kg', price: 700 },
+  { id: 70, name: 'Plantain Flower', unit: 'kg', price: 70 },
+  { id: 71, name: 'Plantain Stem', unit: 'kg', price: 40 },
+  { id: 72, name: 'Potato', unit: 'kg', price: 30 },
+  { id: 73, name: 'Prawn', unit: 'kg', price: 520 },
+  { id: 74, name: 'Raisins', unit: 'kg', price: 420 },
+  { id: 75, name: 'Raw Banana', unit: 'kg', price: 35 },
+  { id: 76, name: 'Raw Mango', unit: 'kg', price: 50 },
+  { id: 77, name: 'Raw Rice', unit: 'kg', price: 48 },
+  { id: 78, name: 'Red Chili Powder', unit: 'kg', price: 320 },
+  { id: 79, name: 'Rice Flour', unit: 'kg', price: 42 },
+  { id: 80, name: 'Ridge Gourd', unit: 'kg', price: 40 },
+  { id: 81, name: 'Salt', unit: 'kg', price: 18 },
+  { id: 82, name: 'Seeraga Samba Rice', unit: 'kg', price: 95 },
+  { id: 83, name: 'Sesame Seeds', unit: 'kg', price: 170 },
+  { id: 84, name: 'Soy Sauce', unit: 'L', price: 90 },
+  { id: 85, name: 'Spinach (Keerai mix)', unit: 'kg', price: 35 },
+  { id: 86, name: 'Star Anise', unit: 'kg', price: 950 },
+  { id: 87, name: 'Sugar', unit: 'kg', price: 42 },
+  { id: 88, name: 'Sunflower Oil', unit: 'L', price: 150 },
+  { id: 89, name: 'Sweet Potato', unit: 'kg', price: 40 },
+  { id: 90, name: 'Sweetless Kova', unit: 'kg', price: 420 },
+  { id: 91, name: 'Tamarind', unit: 'kg', price: 160 },
+  { id: 92, name: 'Tandoori Masala', unit: 'kg', price: 520 },
+  { id: 93, name: 'Tomato', unit: 'kg', price: 30 },
+  { id: 94, name: 'Tomato Ketchup', unit: 'L', price: 110 },
+  { id: 95, name: 'Toor Dal', unit: 'kg', price: 165 },
+  { id: 96, name: 'Turmeric Powder', unit: 'kg', price: 260 },
+  { id: 97, name: 'Urad Dal', unit: 'kg', price: 130 },
+  { id: 98, name: 'Vinegar', unit: 'L', price: 55 },
+  { id: 99, name: 'Water', unit: 'L', price: 2 },
+];
+
+const defaultRecipes = [
+  {
+    id: 1, name: 'Sample Chicken Curry', yieldQty: 1, yieldUnit: 'kg', miscCost: 20, packagingCost: 15, 
+    items: [
+      { id: 101, ingredientId: 22, qty: 500, unit: 'g' }, 
+      { id: 102, ingredientId: 67, qty: 200, unit: 'g' },  
+      { id: 103, ingredientId: 93, qty: 150, unit: 'g' },  
+      { id: 104, ingredientId: 88, qty: 50, unit: 'ml' }, 
+      { id: 105, ingredientId: 46, qty: 10, unit: 'g' },  
+      { id: 106, ingredientId: 81, qty: 15, unit: 'g' },  
+    ],
+  },
+];
+
+const defaultMenuItems = [
+  { id: 1, name: 'Mutton biryani', category: 'Main Course', price: 295 },
+  { id: 2, name: 'Chicken biryani', category: 'Main Course', price: 199 },
+  { id: 3, name: 'Prawn biryani', category: 'Main Course', price: 320 },
+  { id: 4, name: 'Chicken rice', category: 'Main Course', price: 210 },
+  { id: 5, name: 'Prawn rice', category: 'Main Course', price: 199 },
+  { id: 6, name: 'Veg pulao + paneer', category: 'Main Course', price: 199 },
+  { id: 7, name: 'Veg pulao + chicken', category: 'Main Course', price: 199 },
+  { id: 8, name: 'Chapathi + chicken', category: 'Main Course', price: 199 },
+  { id: 9, name: 'Idli + chicken', category: 'Tiffin', price: 199 },
+  { id: 10, name: 'Idli + prawn kulambu', category: 'Tiffin', price: 199 },
+  { id: 11, name: 'Idli + fish kulambu', category: 'Tiffin', price: 199 },
+  { id: 12, name: 'Pudina chicken (Dry)', category: 'Starters', price: 190 },
+  { id: 13, name: 'Pudina chicken (Gravy)', category: 'Main Course', price: 190 },
+  { id: 14, name: 'Pepper chicken (Dry)', category: 'Starters', price: 190 },
+  { id: 15, name: 'Pepper chicken (Gravy)', category: 'Main Course', price: 190 },
+  { id: 16, name: 'Pallipalayam chicken', category: 'Starters', price: 190 },
+  { id: 17, name: 'Chicken uppu kari', category: 'Starters', price: 190 },
+  { id: 18, name: 'Cashew chicken', category: 'Starters', price: 199 },
+  { id: 19, name: 'Prawn gravy', category: 'Main Course', price: 199 },
+  { id: 20, name: 'Prawn masala', category: 'Main Course', price: 199 },
+  { id: 21, name: 'Prawn thokku', category: 'Main Course', price: 210 },
+  { id: 22, name: 'Prawn pepper fry', category: 'Starters', price: 210 },
+  { id: 23, name: 'Prawn tawa fry', category: 'Starters', price: 199 },
+  { id: 24, name: 'Crispy prawn', category: 'Starters', price: 259 },
+  { id: 25, name: 'Prawn fry (3 pcs)', category: 'Starters', price: 320 },
+  { id: 26, name: 'Fish kulambu', category: 'Main Course', price: 299 },
+  { id: 27, name: 'Fish podimas', category: 'Starters', price: 190 },
+  { id: 28, name: 'Fish finger / Fry', category: 'Starters', price: 259 },
+  { id: 29, name: 'Fish fry', category: 'Starters', price: 65 },
+  { id: 30, name: 'Vanjaram fish fry', category: 'Starters', price: 190 },
+  { id: 31, name: 'Kadamba varuval', category: 'Starters', price: 210 },
+  { id: 32, name: 'Kadamba gravy', category: 'Main Course', price: 199 },
+  { id: 33, name: 'Nandu gravy', category: 'Main Course', price: 299 },
+  { id: 34, name: 'Nandu masala', category: 'Main Course', price: 299 },
+  { id: 35, name: 'Nandu kulambu', category: 'Main Course', price: 259 },
+  { id: 36, name: 'Veg special meals', category: 'Main Course', price: 230 },
+  { id: 37, name: 'Packaging Charge', category: 'Misc', price: 20 },
+];
+
+// ==========================================
+// MODULE 1: KITCHEN & RECIPE CALCULATOR
+// ==========================================
+const KitchenModule = ({ user, showToast }) => {
+  const [activeTab, setActiveTab] = useState('calculator');
+  const [ingredients, setIngredients] = useState(defaultIngredients);
+  const [recipes, setRecipes] = useState(defaultRecipes);
+  
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [newIng, setNewIng] = useState({ name: '', unit: 'kg', price: '' });
+  const [selectedRecipeId, setSelectedRecipeId] = useState(1);
+  const [newItem, setNewItem] = useState({ ingredientId: '', qty: '', unit: '' });
+  const [newRecipeName, setNewRecipeName] = useState('');
+  const [isCreatingRecipe, setIsCreatingRecipe] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'kitchen_data', 'main_state');
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.ingredients && data.ingredients.length > 0) setIngredients(data.ingredients);
+        if (data.recipes && data.recipes.length > 0) {
+            setRecipes(data.recipes);
+            setSelectedRecipeId(prev => {
+                if (!prev || !data.recipes.find(r => r.id === prev)) return data.recipes[0].id;
+                return prev;
+            });
+        }
+        if (data.lastUpdated) setLastSaved(new Date(data.lastUpdated).toLocaleTimeString());
+      }
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleSaveToCloud = async () => {
+    if (!user) return;
+    setIsSaving(true);
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'kitchen_data', 'main_state');
+      await setDoc(docRef, { ingredients, recipes, lastUpdated: new Date().toISOString() });
+      showToast("Kitchen data saved successfully!");
+      setLastSaved(new Date().toLocaleTimeString());
+    } catch (err) {
+      showToast("Error saving kitchen data.");
+    }
+    setIsSaving(false);
+  };
+
+  const handleExportPDF = () => {
+    showToast("Generating PDF... Please wait.");
+    setIsExporting(true);
+    setTimeout(() => {
+      const element = document.getElementById('kitchen-printable-area');
+      const opt = {
+        margin: [0.4, 0.3, 0.4, 0.3],
+        filename: `QuickBox_Kitchen_${activeTab}.pdf`,
+        image: { type: 'jpeg', quality: 1 },
+        html2canvas: { scale: 2, useCORS: true, scrollY: 0, windowHeight: element.scrollHeight },
+        jsPDF: { unit: 'in', format: 'a4', orientation: activeTab === 'summary' ? 'landscape' : 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' }
+      };
+      const generate = () => {
+        window.html2pdf().set(opt).from(element).save().then(() => {
+          setIsExporting(false); showToast("PDF Downloaded Successfully!");
+        }).catch(err => { setIsExporting(false); showToast("Error generating PDF."); });
+      };
+      if (!window.html2pdf) {
+        const script = document.createElement('script');
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+        script.onload = generate;
+        document.body.appendChild(script);
+      } else generate();
+    }, 1000);
+  };
+
+  const activeRecipe = recipes.find(r => r.id === selectedRecipeId) || recipes[0] || null;
+
+  const recipeCalculations = useMemo(() => {
+    if (!activeRecipe) return { baseCost: 0, totalCost: 0, profitAmount: 0, finalPrice: 0, items: [] };
+    let baseCost = 0;
+    const detailedItems = activeRecipe.items.map(item => {
+      const ing = ingredients.find(i => i.id === item.ingredientId);
+      if (!ing) return { ...item, cost: 0, name: 'Unknown', masterPrice: 0, masterUnit: '?' };
+      const convertedQty = convertQuantity(item.qty, item.unit, ing.unit);
+      const cost = convertedQty * ing.price;
+      baseCost += cost;
+      return { ...item, name: ing.name, masterPrice: ing.price, masterUnit: ing.unit, cost };
+    });
+    const miscCost = parseFloat(activeRecipe.miscCost) || 0;
+    const packagingCost = parseFloat(activeRecipe.packagingCost) || 0;
+    const totalCost = baseCost + miscCost + packagingCost;
+    const profitAmount = totalCost * 0.30;
+    const finalPrice = totalCost + profitAmount;
+    return { baseCost, miscCost, packagingCost, totalCost, profitAmount, finalPrice, items: detailedItems };
+  }, [activeRecipe, ingredients]);
+
+  const renderMasterData = () => {
+    const addIngredient = () => {
+      if (!newIng.name || !newIng.price) return;
+      setIngredients([{ id: Date.now(), name: newIng.name, unit: newIng.unit, price: parseFloat(newIng.price) }, ...ingredients]);
+      setNewIng({ name: '', unit: 'kg', price: '' });
+    };
+    const deleteIngredient = (id) => { setIngredients(ingredients.filter(ing => ing.id !== id)); showToast("Ingredient deleted."); };
+    const filteredIngredients = ingredients.filter(ing => ing.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    return (
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-visible print:border-none print:shadow-none">
+          <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row justify-between sm:items-center gap-4 print:hidden">
+            <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2"><Database className="w-5 h-5 text-orange-600" /> Master Data ({ingredients.length} Items)</h2>
+            <input type="text" placeholder="Search ingredients..." className="rounded-lg border-slate-300 border px-3 py-1.5 text-sm focus:ring-2 focus:ring-orange-500 outline-none w-full sm:w-64" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+          </div>
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50 print:hidden">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input type="text" placeholder="Ingredient Name" className="flex-1 rounded-lg border-slate-300 border p-2.5 focus:ring-2 focus:ring-orange-500 outline-none text-sm" value={newIng.name} onChange={(e) => setNewIng({...newIng, name: e.target.value})} />
+              <select className="rounded-lg border-slate-300 border p-2.5 outline-none bg-white text-sm focus:ring-2 focus:ring-orange-500" value={newIng.unit} onChange={(e) => setNewIng({...newIng, unit: e.target.value})}>
+                <option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option><option value="pc">pc (Nos)</option><option value="dozen">dozen</option>
+              </select>
+              <input type="number" placeholder="Price (₹)" className="w-full sm:w-32 rounded-lg border-slate-300 border p-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm" value={newIng.price} onChange={(e) => setNewIng({...newIng, price: e.target.value})} />
+              <button onClick={addIngredient} className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2.5 rounded-lg flex items-center justify-center gap-2 font-medium transition-colors"><Plus className="w-4 h-4" /> Add</button>
+            </div>
+          </div>
+          <div className="overflow-x-auto max-h-[600px] print:max-h-none print:overflow-visible">
+            <table className="w-full text-left border-collapse min-w-[500px]">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm print:static print:shadow-none">
+                <tr className="border-b border-slate-200 text-slate-500 text-sm">
+                  <th className="p-4 font-medium">Ingredient Name</th><th className="p-4 font-medium">Base Unit</th><th className="p-4 font-medium">Rate per Unit (INR)</th><th className="p-4 font-medium text-right print:hidden">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredIngredients.map((ing) => (
+                  <tr key={ing.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td className="p-4 font-medium text-slate-800">{ing.name}</td>
+                    <td className="p-4 text-slate-600"><span className="px-2.5 py-1 bg-slate-100 rounded-md text-xs font-semibold print:bg-transparent print:p-0">{ing.unit}</span></td>
+                    <td className="p-4 text-slate-800 font-medium">₹{ing.price.toFixed(2)}</td>
+                    <td className="p-4 text-right print:hidden"><button onClick={() => deleteIngredient(ing.id)} className="text-red-500 hover:text-red-700 p-2 rounded-full hover:bg-red-50 transition-colors"><Trash2 className="w-4 h-4" /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderRecipeCalculator = () => {
+    return (
+      <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col lg:flex-row gap-6 items-start print:p-0 print:block overflow-visible">
+        <div className="w-full lg:w-72 flex-shrink-0 flex flex-col gap-4 sticky top-6 print:hidden">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden p-4 flex flex-col max-h-[400px] lg:max-h-[calc(100vh-140px)]">
+            <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2"><ChefHat className="w-4 h-4 text-orange-600" /> Recipes</h3>
+            <div className="space-y-2 overflow-y-auto flex-1 pr-2">
+              {recipes.map(recipe => (
+                <div key={recipe.id} className="flex group">
+                    <button onClick={() => setSelectedRecipeId(recipe.id)} className={`flex-1 text-left px-3 py-2 rounded-l-lg text-sm font-medium transition-colors truncate ${selectedRecipeId === recipe.id ? 'bg-orange-50 text-orange-700 border border-orange-200 border-r-0' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}>{recipe.name}</button>
+                    <button onClick={() => { setRecipes(recipes.filter(r => r.id !== recipe.id)); setSelectedRecipeId(recipes[0]?.id || null); }} className={`px-2 rounded-r-lg border transition-colors ${selectedRecipeId === recipe.id ? 'bg-orange-50 border-orange-200 text-orange-400 hover:text-red-500 hover:bg-red-50 border-l-0' : 'border-transparent text-slate-300 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="w-3 h-3" /></button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 pt-4 border-t border-slate-100 shrink-0">
+              {isCreatingRecipe ? (
+                <div className="space-y-2">
+                  <input type="text" placeholder="Recipe Name" className="w-full rounded-md border-slate-300 border p-2 text-sm outline-none focus:ring-2 focus:ring-orange-500" value={newRecipeName} onChange={(e) => setNewRecipeName(e.target.value)} autoFocus />
+                  <div className="flex gap-2">
+                    <button onClick={() => { if(!newRecipeName) return; const newId = Date.now(); setRecipes([...recipes, { id: newId, name: newRecipeName, items: [], yieldQty: 1, yieldUnit: 'kg', miscCost: 0, packagingCost: 0 }]); setSelectedRecipeId(newId); setNewRecipeName(''); setIsCreatingRecipe(false); }} className="flex-1 bg-orange-600 text-white text-xs py-2 rounded-md font-medium">Save</button>
+                    <button onClick={() => setIsCreatingRecipe(false)} className="flex-1 bg-slate-100 text-slate-600 text-xs py-2 rounded-md font-medium">Cancel</button>
+                  </div>
+                </div>
+              ) : (<button onClick={() => setIsCreatingRecipe(true)} className="w-full flex items-center justify-center gap-2 border border-dashed border-slate-300 text-slate-600 rounded-lg py-2 text-sm font-medium hover:bg-slate-50 hover:text-orange-600"><Plus className="w-4 h-4" /> New Recipe</button>)}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 w-full print:w-full print:block overflow-visible">
+          {activeRecipe ? (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col w-full overflow-visible print:border-none print:shadow-none print:block h-full print:h-auto">
+              <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row justify-between sm:items-center gap-4 shrink-0 print:bg-white print:border-b-2 print:border-slate-800 print:mb-4">
+                <h2 className="text-xl font-bold text-slate-800 print:text-3xl">{activeRecipe.name}</h2>
+                <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm print:border-none print:shadow-none">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider print:text-sm">Total Yield:</span>
+                  <input type="number" className="w-16 border-b border-slate-300 outline-none text-center font-bold text-slate-800 focus:border-orange-500 print:border-none" value={activeRecipe.yieldQty} onChange={(e) => setRecipes(recipes.map(r => r.id === activeRecipe.id ? { ...r, yieldQty: parseFloat(e.target.value) || 1 } : r))} />
+                  <select className="outline-none text-sm font-medium text-slate-600 cursor-pointer bg-transparent print:appearance-none print:font-bold" value={activeRecipe.yieldUnit} onChange={(e) => setRecipes(recipes.map(r => r.id === activeRecipe.id ? { ...r, yieldUnit: e.target.value } : r))}>
+                    <option value="kg">kg</option><option value="L">L</option><option value="pc">pc / Nos</option><option value="portion">portions</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-3 items-end bg-slate-50/50 shrink-0 print:hidden">
+                <div className="flex-1 w-full">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Select Ingredient</label>
+                  <select className="w-full rounded-lg border-slate-300 border p-2.5 outline-none bg-white focus:ring-2 focus:ring-orange-500 text-sm" value={newItem.ingredientId} onChange={(e) => { const ing = ingredients.find(i => i.id === parseInt(e.target.value)); setNewItem({ ...newItem, ingredientId: e.target.value, unit: ing ? getCompatibleUnits(ing.unit)[0] : '' }); }}>
+                    <option value="">Select Ingredient...</option>
+                    {ingredients.map(ing => (<option key={ing.id} value={ing.id}>{ing.name} (₹{ing.price}/{ing.unit})</option>))}
+                  </select>
+                </div>
+                <div className="w-full sm:w-24">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Qty</label>
+                  <input type="number" className="w-full rounded-lg border-slate-300 border p-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm" value={newItem.qty} onChange={(e) => setNewItem({...newItem, qty: e.target.value})} />
+                </div>
+                <div className="w-full sm:w-24">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Unit</label>
+                  <select className="w-full rounded-lg border-slate-300 border p-2.5 outline-none bg-white focus:ring-2 focus:ring-orange-500 text-sm" value={newItem.unit} onChange={(e) => setNewItem({...newItem, unit: e.target.value})} disabled={!newItem.ingredientId}>
+                    {newItem.ingredientId ? getCompatibleUnits(ingredients.find(i => i.id === parseInt(newItem.ingredientId))?.unit).map(u => (<option key={u} value={u}>{u}</option>)) : <option value="">-</option>}
+                  </select>
+                </div>
+                <button onClick={() => { if (!newItem.ingredientId || !newItem.qty) return; setRecipes(recipes.map(r => r.id === activeRecipe.id ? { ...r, items: [...r.items, { id: Date.now() + Math.random(), ingredientId: parseInt(newItem.ingredientId), qty: parseFloat(newItem.qty), unit: newItem.unit }] } : r)); setNewItem({ ingredientId: '', qty: '', unit: '' }); }} disabled={!newItem.ingredientId || !newItem.qty} className="w-full sm:w-auto bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 text-white px-6 py-2.5 rounded-lg flex items-center justify-center font-medium"><Plus className="w-4 h-4 mr-1" /> Add</button>
+              </div>
+
+              <div className="w-full overflow-x-auto border-b border-slate-100 print:overflow-visible">
+                <table className="w-full text-left border-collapse min-w-[500px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 print:bg-transparent print:border-b-2 print:border-slate-400">
+                    <tr className="text-slate-500 text-xs sm:text-sm uppercase tracking-wider print:text-black">
+                      <th className="p-4 font-semibold">Ingredient</th><th className="p-4 font-semibold text-right">Qty Used</th><th className="p-4 font-semibold text-right hidden sm:table-cell print:table-cell">Master Rate</th><th className="p-4 font-semibold text-right bg-orange-50/50 print:bg-transparent">Cost (₹)</th><th className="p-4 font-semibold text-center w-12 print:hidden"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recipeCalculations.items.map((item) => (
+                      <tr key={item.id} className="border-b border-slate-100 print:border-b print:border-slate-300">
+                        <td className="p-4 font-medium text-slate-800 text-sm">{item.name}</td>
+                        <td className="p-4 text-right text-slate-700 text-sm"><span className="font-semibold">{item.qty}</span> <span className="text-slate-500 text-xs">{item.unit}</span></td>
+                        <td className="p-4 text-right text-slate-500 text-xs hidden sm:table-cell print:table-cell">₹{item.masterPrice} / {item.masterUnit}</td>
+                        <td className="p-4 text-right font-bold text-orange-700 bg-orange-50/30 print:bg-transparent print:text-black">₹{item.cost.toFixed(2)}</td>
+                        <td className="p-4 text-center print:hidden"><button onClick={() => setRecipes(recipes.map(r => r.id === activeRecipe.id ? { ...r, items: r.items.filter(i => i.id !== item.id) } : r))} className="text-slate-400 hover:text-red-500 p-1"><X className="w-4 h-4" /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="p-4 sm:p-6 bg-slate-50 shrink-0 print:shrink print:bg-transparent">
+                <div className="flex flex-col sm:flex-row justify-end gap-6 text-sm">
+                  <div className="space-y-3 w-full sm:w-72">
+                    <div className="flex justify-between items-center"><span className="text-slate-500 font-medium">Ingredients Cost:</span><span className="font-semibold text-slate-800">₹{recipeCalculations.baseCost.toFixed(2)}</span></div>
+                    <div className="flex justify-between items-center print:border-b print:border-dashed print:border-slate-300 print:pb-1">
+                      <span className="text-slate-500 font-medium">Misc Cost (₹):</span>
+                      <input type="number" className="w-24 p-1.5 text-right border border-slate-300 rounded focus:ring-2 focus:ring-orange-500 print:border-none print:p-0 print:bg-transparent" value={activeRecipe.miscCost || ''} onChange={(e) => setRecipes(recipes.map(r => r.id === activeRecipe.id ? { ...r, miscCost: e.target.value } : r))} />
+                    </div>
+                    <div className="flex justify-between items-center print:border-b print:border-dashed print:border-slate-300 print:pb-1">
+                      <span className="text-slate-500 font-medium">Packaging (₹):</span>
+                      <input type="number" className="w-24 p-1.5 text-right border border-slate-300 rounded focus:ring-2 focus:ring-orange-500 print:border-none print:p-0 print:bg-transparent" value={activeRecipe.packagingCost || ''} onChange={(e) => setRecipes(recipes.map(r => r.id === activeRecipe.id ? { ...r, packagingCost: e.target.value } : r))} />
+                    </div>
+                    <div className="border-t border-slate-200 pt-2 flex justify-between items-center"><span className="text-slate-700 font-bold">Total Production Cost:</span><span className="font-bold text-slate-800">₹{recipeCalculations.totalCost.toFixed(2)}</span></div>
+                    <div className="flex justify-between items-center text-orange-600 print:text-black"><span className="font-semibold">+ 30% Profit Margin:</span><span className="font-bold">₹{recipeCalculations.profitAmount.toFixed(2)}</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-800 text-white p-4 sm:p-6 flex flex-col sm:flex-row justify-between items-center rounded-b-xl shrink-0 gap-4 print:shrink print:bg-slate-100 print:text-black print:border-2 print:border-slate-800">
+                <div className="w-full sm:w-auto text-center sm:text-left">
+                  <div className="text-slate-300 text-xs sm:text-sm mb-1 uppercase tracking-wider font-semibold print:text-slate-600">Final Selling Price</div>
+                  <div className="text-2xl sm:text-3xl font-bold text-emerald-400 print:text-black">₹{recipeCalculations.finalPrice.toFixed(2)}</div>
+                </div>
+                <div className="w-full sm:w-auto text-center sm:text-right border-t sm:border-t-0 sm:border-l border-slate-600 pt-4 sm:pt-0 sm:pl-6 print:border-slate-300">
+                  <div className="text-slate-300 text-xs sm:text-sm mb-1 uppercase tracking-wider font-semibold print:text-slate-600">Price per 1 {activeRecipe.yieldUnit}</div>
+                  <div className="text-xl sm:text-2xl font-bold text-emerald-400 print:text-black">₹{(recipeCalculations.finalPrice / (activeRecipe.yieldQty || 1)).toFixed(2)}</div>
+                </div>
+              </div>
+            </div>
+          ) : (<div className="h-full flex flex-col items-center justify-center text-slate-400 bg-white rounded-xl border border-dashed border-slate-300 min-h-[400px] print:hidden"><Calculator className="w-12 h-12 mb-4 text-slate-300" /><p>Select or create a recipe.</p></div>)}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSummary = () => {
+    const summaryData = recipes.map(recipe => {
+      let baseCost = 0;
+      recipe.items.forEach(item => {
+        const ing = ingredients.find(i => i.id === item.ingredientId);
+        if (ing) baseCost += convertQuantity(item.qty, item.unit, ing.unit) * ing.price;
+      });
+      const totalCost = baseCost + (parseFloat(recipe.miscCost) || 0) + (parseFloat(recipe.packagingCost) || 0);
+      const finalPrice = totalCost + (totalCost * 0.30);
+      return { ...recipe, baseCost, totalCost, profitAmount: totalCost * 0.30, finalPrice, costPerUnit: finalPrice / (recipe.yieldQty || 1) };
+    });
+
+    return (
+      <div className="p-4 sm:p-6 max-w-7xl mx-auto">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-visible print:border-none print:shadow-none">
+          <div className="bg-slate-800 px-6 py-5 print:bg-white print:border-b-2 print:border-black print:px-0">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2 print:text-black print:text-3xl">Executive Summary</h2>
+            <p className="text-slate-300 text-sm mt-1 print:text-slate-600">Cost and suggested selling price overview.</p>
+          </div>
+          <div className="overflow-x-auto print:overflow-visible">
+            <table className="w-full text-left border-collapse min-w-[700px] print:w-full">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs sm:text-sm uppercase tracking-wider print:bg-transparent">
+                  <th className="p-5 font-bold print:px-2">Recipe Name</th><th className="p-5 font-bold text-right print:px-2">Yield</th><th className="p-5 font-bold text-right print:px-2">Ing. Cost</th><th className="p-5 font-bold text-right text-orange-700 bg-orange-50/50 print:bg-transparent print:text-black print:px-2">Total + Profit (30%)</th><th className="p-5 font-bold text-right bg-emerald-50 text-emerald-800 print:bg-transparent print:text-black print:px-2">Price / Unit</th><th className="p-5 font-bold text-center print:hidden">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summaryData.map((row) => (
+                  <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors print:border-b print:border-slate-300">
+                    <td className="p-5 font-semibold text-slate-800 print:px-2">{row.name}</td>
+                    <td className="p-5 text-right text-slate-600 whitespace-nowrap print:px-2">{row.yieldQty} {row.yieldUnit}</td>
+                    <td className="p-5 text-right font-medium text-slate-500 whitespace-nowrap print:px-2">₹{row.baseCost.toFixed(2)}</td>
+                    <td className="p-5 text-right whitespace-nowrap bg-orange-50/30 print:bg-transparent print:px-2">
+                      <div className="font-bold text-orange-700 print:text-black">₹{row.finalPrice.toFixed(2)}</div>
+                      <div className="text-xs text-orange-500 font-medium print:text-slate-500">Profit: ₹{row.profitAmount.toFixed(2)}</div>
+                    </td>
+                    <td className="p-5 text-right font-bold text-emerald-600 bg-emerald-50/30 whitespace-nowrap print:bg-transparent print:text-black print:px-2">₹{row.costPerUnit.toFixed(2)} <span className="text-xs text-emerald-600/60 font-medium print:text-slate-500">/ {row.yieldUnit}</span></td>
+                    <td className="p-5 text-center print:hidden"><button onClick={() => { const newRecipes = recipes.filter(r => r.id !== row.id); setRecipes(newRecipes); if(selectedRecipeId === row.id) setSelectedRecipeId(newRecipes[0]?.id || null); showToast("Recipe deleted."); }} className="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"><Trash2 className="w-4 h-4" /></button></td>
+                  </tr>
+                ))}
+                {summaryData.length === 0 && (
+                  <tr><td colSpan={6} className="p-12 text-center text-slate-500">No recipes found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div id="kitchen-printable-area" className={`flex-1 flex flex-col h-full overflow-auto ${isExporting ? 'pdf-export-mode' : ''}`}>
+      {isExporting && (<style>{`.pdf-export-mode .print\\:hidden { display: none !important; } .pdf-export-mode { background-color: white !important; height: auto !important; overflow: visible !important; } .pdf-export-mode * { overflow: visible !important; }`}</style>)}
+      
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shrink-0 print:hidden">
+        <div className="px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between h-auto py-3 gap-4">
+            <nav className="flex gap-1 w-full sm:w-auto overflow-x-auto justify-center sm:justify-start">
+              <button onClick={() => setActiveTab('master')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'master' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><Database className="w-4 h-4"/> Master Data</button>
+              <button onClick={() => setActiveTab('calculator')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'calculator' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><Calculator className="w-4 h-4"/> Recipe Calculator</button>
+              <button onClick={() => setActiveTab('summary')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'summary' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><FileText className="w-4 h-4"/> Summary</button>
+            </nav>
+            <div className="flex items-center gap-3 justify-center sm:justify-end">
+               <button onClick={handleExportPDF} className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg border border-slate-200"><Printer className="w-4 h-4"/> PDF</button>
+               <button onClick={handleSaveToCloud} disabled={isSaving} className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white text-xs font-bold rounded-lg"><Save className="w-4 h-4"/> {isSaving ? '...' : 'Sync Data'}</button>
+            </div>
+        </div>
+      </header>
+
+      <div className="flex-1">
+        {activeTab === 'master' && renderMasterData()}
+        {activeTab === 'calculator' && renderRecipeCalculator()}
+        {activeTab === 'summary' && renderSummary()}
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// MODULE 2: INVOICING & BILLING
+// ==========================================
+const InvoiceModule = ({ user, showToast }) => {
+  const [activeTab, setActiveTab] = useState('create');
+  const [menuItems, setMenuItems] = useState(defaultMenuItems);
+  const [invoices, setInvoices] = useState([]);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const [newMenuItem, setNewMenuItem] = useState({ name: '', category: 'Main Course', price: '' });
+  const [menuSearch, setMenuSearch] = useState('');
+
+  const [invoiceData, setInvoiceData] = useState({
+    invoiceNo: 'INV-1001', date: new Date().toISOString().split('T')[0], customerName: '', customerPhone: '', customerAddress: '', items: [], taxRate: 5, discount: 0
+  });
+  const [selectedMenuItem, setSelectedMenuItem] = useState('');
+  const [selectedQty, setSelectedQty] = useState(1);
+  
+  const [createDelivery, setCreateDelivery] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'invoice_app', 'main_state');
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.menuItems && data.menuItems.length > 0) setMenuItems(data.menuItems);
+        if (data.invoices) {
+            setInvoices(data.invoices);
+            setInvoiceData(prev => ({ ...prev, invoiceNo: getNextInvoiceNo(data.invoices) }));
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleExportPDF = (elementId, filename) => {
+    showToast("Generating Invoice PDF...");
+    setIsExporting(true);
+    setTimeout(() => {
+      const element = document.getElementById(elementId);
+      const opt = { margin: [0.5, 0.5, 0.5, 0.5], filename: `${filename}.pdf`, image: { type: 'jpeg', quality: 1 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' } };
+      const generate = () => {
+        window.html2pdf().set(opt).from(element).save().then(() => { setIsExporting(false); showToast("PDF Downloaded!"); }).catch(err => setIsExporting(false));
+      };
+      if (!window.html2pdf) {
+        const script = document.createElement('script');
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+        script.onload = generate;
+        document.body.appendChild(script);
+      } else generate();
+    }, 800);
+  };
+
+  const renderMenuItems = () => {
+    const addItem = () => {
+      if (!newMenuItem.name || !newMenuItem.price) return;
+      setMenuItems([{ id: Date.now(), name: newMenuItem.name, category: newMenuItem.category, price: parseFloat(newMenuItem.price) }, ...menuItems]);
+      setNewMenuItem({ name: '', category: 'Main Course', price: '' });
+      showToast("Menu Item added.");
+    };
+    return (
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2"><List className="w-5 h-5 text-orange-600" /> Menu & Pricing</h2>
+            <input type="text" placeholder="Search menu..." className="rounded-lg border-slate-300 border px-3 py-1.5 text-sm focus:ring-2 focus:ring-orange-500 outline-none w-full sm:w-64" value={menuSearch} onChange={(e) => setMenuSearch(e.target.value)} />
+          </div>
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input type="text" placeholder="Item Name" className="flex-1 rounded-lg border-slate-300 border p-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm" value={newMenuItem.name} onChange={(e) => setNewMenuItem({...newMenuItem, name: e.target.value})} />
+              <select className="rounded-lg border-slate-300 border p-2.5 outline-none bg-white text-sm focus:ring-2 focus:ring-orange-500" value={newMenuItem.category} onChange={(e) => setNewMenuItem({...newMenuItem, category: e.target.value})}>
+                <option value="Main Course">Main Course</option><option value="Starters">Starters</option><option value="Tiffin">Tiffin</option><option value="Beverage">Beverage</option><option value="Misc">Misc</option>
+              </select>
+              <input type="number" placeholder="Price (₹)" className="w-full sm:w-32 rounded-lg border-slate-300 border p-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm" value={newMenuItem.price} onChange={(e) => setNewMenuItem({...newMenuItem, price: e.target.value})} />
+              <button onClick={addItem} className="bg-slate-800 hover:bg-slate-900 text-white px-6 py-2.5 rounded-lg flex items-center gap-2 font-medium"><Plus className="w-4 h-4" /> Add</button>
+            </div>
+          </div>
+          <div className="overflow-x-auto max-h-[600px]">
+            <table className="w-full text-left border-collapse min-w-[500px]">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                <tr className="border-b border-slate-200 text-slate-500 text-sm">
+                  <th className="p-4 font-medium">Item Name</th><th className="p-4 font-medium">Category</th><th className="p-4 font-medium text-right">Price (₹)</th><th className="p-4 font-medium text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {menuItems.filter(i => i.name.toLowerCase().includes(menuSearch.toLowerCase())).map((item) => (
+                  <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="p-4 font-medium text-slate-800">{item.name}</td>
+                    <td className="p-4 text-slate-600"><span className="px-2.5 py-1 bg-slate-100 rounded-md text-xs font-semibold">{item.category}</span></td>
+                    <td className="p-4 text-slate-800 font-bold text-right">₹{item.price.toFixed(2)}</td>
+                    <td className="p-4 text-center"><button onClick={() => setMenuItems(menuItems.filter(i => i.id !== item.id))} className="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50"><Trash2 className="w-4 h-4" /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCreateInvoice = () => {
+    const subtotal = invoiceData.items.reduce((sum, item) => sum + item.total, 0);
+    const discountAmount = parseFloat(invoiceData.discount) || 0;
+    const taxAmount = (subtotal - discountAmount) * ((parseFloat(invoiceData.taxRate) || 0) / 100);
+    const grandTotal = (subtotal - discountAmount) + taxAmount;
+
+    const handleSaveInvoice = async () => {
+        if(invoiceData.items.length===0) {
+            showToast("Add items to the invoice first!");
+            return;
+        }
+
+        const newInvoice = {
+            ...invoiceData, 
+            id: Date.now(), 
+            subtotal, 
+            taxAmount, 
+            grandTotal, 
+            status: 'Pending'
+        };
+
+        const updatedInvoices = [newInvoice, ...invoices];
+        setInvoices(updatedInvoices);
+
+        if (createDelivery) {
+            try {
+                const deliveryRef = doc(db, 'artifacts', appId, 'public', 'data', 'delivery_app', 'main_state');
+                const dSnap = await getDoc(deliveryRef);
+                let currentDeliveries = [];
+                if (dSnap.exists() && dSnap.data().deliveries) {
+                    currentDeliveries = dSnap.data().deliveries;
+                }
+                
+                const newDeliveryTask = {
+                    id: Date.now() + 1,
+                    orderId: newInvoice.invoiceNo,
+                    customerName: newInvoice.customerName || 'Walk-in Customer',
+                    phone: newInvoice.customerPhone || 'N/A',
+                    address: newInvoice.customerAddress || 'Direct Pickup / No Address',
+                    platform: 'Invoice Order',
+                    amount: newInvoice.grandTotal,
+                    driverName: '',
+                    status: 'Pending',
+                    timeAdded: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                };
+                
+                await setDoc(deliveryRef, { deliveries: [newDeliveryTask, ...currentDeliveries], lastUpdated: new Date().toISOString() }, {merge: true});
+                showToast("Invoice Saved & Delivery Task created!");
+            } catch (error) {
+                console.error(error);
+                showToast("Invoice saved, but failed to sync Delivery.");
+            }
+        } else {
+            showToast("Invoice Saved to History!");
+        }
+
+        if (user) {
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'invoice_app', 'main_state');
+                await setDoc(docRef, { menuItems, invoices: updatedInvoices, lastUpdated: new Date().toISOString() });
+            } catch(e) {}
+        }
+
+        setInvoiceData({
+            invoiceNo: getNextInvoiceNo(updatedInvoices), 
+            date: new Date().toISOString().split('T')[0], 
+            customerName: '', 
+            customerPhone: '', 
+            customerAddress: '', 
+            items: [], 
+            taxRate: 5, 
+            discount: 0
+        });
+    };
+
+    return (
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto flex flex-col gap-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-4 items-end">
+                <div className="w-full sm:flex-1">
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Select Menu Item</label>
+                  <select className="w-full rounded-lg border-slate-300 border p-2.5 outline-none bg-white text-sm font-medium focus:ring-2 focus:ring-orange-500" value={selectedMenuItem} onChange={(e) => setSelectedMenuItem(e.target.value)}>
+                    <option value="">-- Select Ingredient --</option>
+                    {menuItems.map(item => (<option key={item.id} value={item.id}>{item.name} - ₹{item.price}</option>))}
+                  </select>
+                </div>
+                <div className="w-full sm:w-24">
+                  <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Qty</label>
+                  <input type="number" min="1" className="w-full rounded-lg border-slate-300 border p-2.5 outline-none text-sm font-medium focus:ring-2 focus:ring-orange-500" value={selectedQty} onChange={(e) => setSelectedQty(e.target.value)} />
+                </div>
+                <button onClick={() => { if(!selectedMenuItem || selectedQty<=0) return; const item = menuItems.find(i=>i.id===parseInt(selectedMenuItem)); if(item) setInvoiceData({...invoiceData, items: [...invoiceData.items, { id: Date.now()+Math.random(), menuId: item.id, name: item.name, price: item.price, qty: parseInt(selectedQty), total: item.price*parseInt(selectedQty) }]}); setSelectedMenuItem(''); setSelectedQty(1); }} disabled={!selectedMenuItem} className="w-full sm:w-auto bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 text-white px-6 py-2.5 rounded-lg flex items-center justify-center gap-2 font-medium"><Plus className="w-4 h-4" /> Add</button>
+            </div>
+        </div>
+
+        <div id="invoice-print-area" className="bg-white rounded-xl shadow-md border border-slate-200 p-8 sm:p-12 text-slate-800">
+            <div className="flex flex-col sm:flex-row justify-between items-start border-b-2 border-slate-800 pb-6 mb-6">
+                <div className="flex items-center gap-3 mb-4 sm:mb-0">
+                    <div className="flex items-center justify-center w-14 h-14 bg-orange-500 rounded-full border-2 border-orange-600 text-white"><Truck className="w-7 h-7" /></div>
+                    <div>
+                        <h1 className="text-2xl font-black tracking-tight leading-none text-slate-900">QUICK BOX</h1>
+                        <h2 className="text-sm font-bold text-orange-600 tracking-widest uppercase">Cloud Kitchen</h2>
+                        <p className="text-xs text-slate-500 mt-1">16 kanni amman koil street, lakshmipuram<br/>kolathur, Chennai 600099 | Ph: 9884716338</p>
+                    </div>
+                </div>
+                <div className="text-left sm:text-right w-full sm:w-auto">
+                    <h2 className="text-3xl font-black text-slate-300 uppercase tracking-widest mb-2">Invoice</h2>
+                    <div className="flex items-center sm:justify-end gap-2 text-sm mb-1"><span className="font-semibold text-slate-500">Invoice No:</span><input type="text" className="font-bold outline-none border-b border-transparent hover:border-slate-300 focus:border-orange-500 text-right w-32 bg-transparent" value={invoiceData.invoiceNo} onChange={(e) => setInvoiceData({...invoiceData, invoiceNo: e.target.value})} /></div>
+                    <div className="flex items-center sm:justify-end gap-2 text-sm"><span className="font-semibold text-slate-500">Date:</span><input type="date" className="outline-none border-b border-transparent hover:border-slate-300 focus:border-orange-500 text-right font-medium bg-transparent" value={invoiceData.date} onChange={(e) => setInvoiceData({...invoiceData, date: e.target.value})} /></div>
+                </div>
+            </div>
+
+            <div className="mb-8">
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Billed To</h3>
+                <div className="space-y-1.5 max-w-sm">
+                    <input type="text" placeholder="Customer Name" className="w-full text-lg font-bold outline-none border-b border-transparent hover:border-slate-200 focus:border-orange-500 bg-transparent placeholder-slate-300 transition-colors pb-1" value={invoiceData.customerName} onChange={(e) => setInvoiceData({...invoiceData, customerName: e.target.value})} />
+                    <input type="text" placeholder="Phone Number" className="w-full text-sm outline-none border-b border-transparent hover:border-slate-200 focus:border-orange-500 bg-transparent placeholder-slate-300 transition-colors pb-1" value={invoiceData.customerPhone} onChange={(e) => setInvoiceData({...invoiceData, customerPhone: e.target.value})} />
+                    <textarea placeholder="Delivery Address (Optional)" className="w-full text-sm outline-none border-b border-transparent hover:border-slate-200 focus:border-orange-500 bg-transparent placeholder-slate-300 transition-colors resize-none leading-snug pb-1 mt-1" value={invoiceData.customerAddress} onChange={(e) => setInvoiceData({...invoiceData, customerAddress: e.target.value})} rows="2" />
+                </div>
+            </div>
+
+            <table className="w-full text-left border-collapse mb-8">
+                <thead>
+                    <tr className="border-b-2 border-slate-300 text-slate-800 text-xs uppercase tracking-wider">
+                        <th className="py-3 font-bold w-12 text-center">#</th><th className="py-3 font-bold">Item Description</th><th className="py-3 font-bold text-center w-24">Qty</th><th className="py-3 font-bold text-right w-32">Rate (₹)</th><th className="py-3 font-bold text-right w-32">Amount (₹)</th><th className="w-10 print:hidden"></th>
+                    </tr>
+                </thead>
+                <tbody className="text-sm">
+                    {invoiceData.items.map((item, index) => (
+                        <tr key={item.id} className="border-b border-slate-100 group">
+                            <td className="py-3 text-slate-500 text-center">{index + 1}</td>
+                            <td className="py-3 font-medium text-slate-800">{item.name}</td>
+                            <td className="py-3 text-center text-slate-600">{item.qty}</td>
+                            <td className="py-3 text-right text-slate-600">{item.price.toFixed(2)}</td>
+                            <td className="py-3 text-right font-bold text-slate-800">{item.total.toFixed(2)}</td>
+                            <td className="py-3 text-right print:hidden"><button onClick={() => setInvoiceData({...invoiceData, items: invoiceData.items.filter(i => i.id !== item.id)})} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100"><X className="w-4 h-4"/></button></td>
+                        </tr>
+                    ))}
+                    {invoiceData.items.length === 0 && (
+                        <tr><td colSpan={6} className="py-8 text-center text-slate-400 italic">No items added to invoice yet.</td></tr>
+                    )}
+                </tbody>
+            </table>
+
+            <div className="flex flex-col sm:flex-row justify-between items-end gap-8">
+                <div className="w-full sm:w-1/2 text-xs text-slate-500 mt-4 border-t border-slate-200 pt-4 flex flex-col gap-3">
+                    <div>
+                        <p className="font-bold text-slate-700 mb-1">Terms & Conditions:</p>
+                        <p>1. Thank you for choosing Quick Box Cloud Kitchen!</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 w-fit print:border-slate-300 print:bg-transparent">
+                        <p className="font-bold text-slate-800 mb-1">Payment Details</p>
+                        <p className="font-medium text-slate-700 flex items-center gap-2">GPAY: <span className="font-bold text-black">+91 9884716338</span></p>
+                        <p className="font-medium text-slate-700 flex items-center gap-2">Name: <span className="font-bold text-black">Saravana Kumari</span></p>
+                    </div>
+                </div>
+                <div className="w-full sm:w-72 space-y-2 text-sm">
+                    <div className="flex justify-between items-center py-1"><span className="font-semibold text-slate-600">Subtotal:</span><span className="font-bold text-slate-800">₹{subtotal.toFixed(2)}</span></div>
+                    <div className="flex justify-between items-center py-1 print:border-none border-b border-dashed border-slate-200"><span className="font-semibold text-slate-600">Discount (₹):</span><input type="number" className="w-20 text-right border border-slate-300 rounded px-1 py-0.5 outline-none print:border-none print:p-0" value={invoiceData.discount === 0 ? '' : invoiceData.discount} onChange={(e) => setInvoiceData({...invoiceData, discount: e.target.value})} placeholder="0" /></div>
+                    <div className="flex justify-between items-center py-1 print:border-none border-b border-dashed border-slate-200"><span className="font-semibold text-slate-600">Tax Rate (%):</span><input type="number" className="w-16 text-right border border-slate-300 rounded px-1 py-0.5 outline-none print:border-none print:p-0" value={invoiceData.taxRate === 0 ? '' : invoiceData.taxRate} onChange={(e) => setInvoiceData({...invoiceData, taxRate: e.target.value})} placeholder="0" /></div>
+                    <div className="flex justify-between items-center py-1"><span className="font-semibold text-slate-600">Tax Amount:</span><span className="font-bold text-slate-800">₹{taxAmount.toFixed(2)}</span></div>
+                    <div className="flex justify-between items-center pt-3 mt-2 border-t-2 border-slate-800 text-lg"><span className="font-black text-slate-800 uppercase tracking-wider">Total:</span><span className="font-black text-orange-600">₹{grandTotal.toFixed(2)}</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 print:hidden border-t border-slate-200 pt-6 mt-2">
+            <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-bold text-sm bg-orange-50 px-4 py-2.5 rounded-lg border border-orange-100 transition-colors hover:bg-orange-100">
+                <input type="checkbox" className="w-4 h-4 accent-orange-600 rounded cursor-pointer" checked={createDelivery} onChange={e => setCreateDelivery(e.target.checked)} />
+                Auto-Create Delivery Task
+            </label>
+            <div className="flex justify-end gap-4 w-full sm:w-auto">
+                <button onClick={handleSaveInvoice} disabled={invoiceData.items.length === 0} className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 text-white px-6 py-3 rounded-lg font-bold w-full sm:w-auto"><Save className="w-5 h-5" /> Save</button>
+                <button onClick={() => handleExportPDF('invoice-print-area', invoiceData.invoiceNo)} className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg font-bold w-full sm:w-auto"><Download className="w-5 h-5" /> PDF</button>
+            </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHistory = () => {
+    return (
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-slate-800 px-6 py-5 flex justify-between items-center">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2"><History className="w-5 h-5 text-orange-400" /> Invoice History</h2>
+            <div className="bg-slate-700 px-4 py-2 rounded-lg text-center"><div className="text-xs text-slate-400 uppercase font-bold">Revenue</div><div className="text-xl font-black text-emerald-400">₹{invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + i.grandTotal, 0).toFixed(2)}</div></div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs uppercase tracking-wider">
+                <tr>
+                  <th className="p-4 font-bold">Date</th>
+                  <th className="p-4 font-bold">Invoice No</th>
+                  <th className="p-4 font-bold">Customer</th>
+                  <th className="p-4 font-bold text-right">Total</th>
+                  <th className="p-4 font-bold text-center">Status</th>
+                  <th className="p-4 font-bold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((inv) => (
+                  <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="p-4 text-slate-600">{inv.date}</td><td className="p-4 font-bold text-slate-800">{inv.invoiceNo}</td><td className="p-4 text-slate-700">{inv.customerName || 'Walk-in'}</td><td className="p-4 text-right font-black">₹{inv.grandTotal.toFixed(2)}</td>
+                    <td className="p-4 text-center">{inv.status === 'Paid' ? <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded">PAID</span> : <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded">PENDING</span>}</td>
+                    <td className="p-4 flex items-center justify-end gap-2">
+                        {inv.status !== 'Paid' && <button onClick={async () => { const up = invoices.map(i => i.id === inv.id ? { ...i, status: 'Paid' } : i); setInvoices(up); if(user){ await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'invoice_app', 'main_state'), { menuItems, invoices: up, lastUpdated: new Date().toISOString() }); } showToast("Paid!"); }} className="px-3 py-1 bg-emerald-500 text-white text-xs font-bold rounded">Pay</button>}
+                        <button onClick={() => { setInvoiceData(inv); setActiveTab('create'); }} className="p-1.5 text-slate-500 hover:text-orange-600"><Printer className="w-4 h-4" /></button>
+                        <button onClick={async () => { const up = invoices.filter(i => i.id !== inv.id); setInvoices(up); if(user){ await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'invoice_app', 'main_state'), { menuItems, invoices: up, lastUpdated: new Date().toISOString() }); } showToast("Deleted."); }} className="p-1.5 text-slate-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    </td>
+                  </tr>
+                ))}
+                {invoices.length === 0 && (
+                  <tr><td colSpan={6} className="p-12 text-center text-slate-500">No invoices found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className={`flex-1 flex flex-col h-full overflow-auto ${isExporting ? 'pdf-export-mode' : ''}`}>
+      {isExporting && (<style>{`.pdf-export-mode .print\\:hidden { display: none !important; } .pdf-export-mode { background-color: white !important; } .pdf-export-mode #invoice-print-area { box-shadow: none !important; border: none !important; margin: 0 !important; padding: 10px !important;}`}</style>)}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shrink-0 print:hidden">
+        <div className="px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between h-auto py-3 gap-4">
+            <nav className="flex gap-1 w-full sm:w-auto overflow-x-auto justify-center sm:justify-start">
+              <button onClick={() => setActiveTab('create')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'create' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><Receipt className="w-4 h-4"/> Builder</button>
+              <button onClick={() => setActiveTab('menu')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'menu' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><List className="w-4 h-4"/> Menu Data</button>
+              <button onClick={() => setActiveTab('history')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'history' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><History className="w-4 h-4"/> History</button>
+            </nav>
+        </div>
+      </header>
+      <div className="flex-1">
+        {activeTab === 'menu' && renderMenuItems()}
+        {activeTab === 'create' && renderCreateInvoice()}
+        {activeTab === 'history' && renderHistory()}
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// MODULE 3: DELIVERY TRACKING
+// ==========================================
+const DeliveryModule = ({ user, showToast }) => {
+  const [activeTab, setActiveTab] = useState('active');
+  const [deliveries, setDeliveries] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [newDelivery, setNewDelivery] = useState({ orderId: generateOrderId(), customerName: '', phone: '', address: '', platform: 'Direct Order', amount: '', driverName: '' });
+
+  useEffect(() => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'delivery_app', 'main_state');
+    const unsubscribe = onSnapshot(docRef, (docSnap) => { if (docSnap.exists()) setDeliveries(docSnap.data().deliveries || []); });
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleSaveToCloud = async () => {
+    if (!user) return;
+    setIsSaving(true);
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'delivery_app', 'main_state'), { deliveries, lastUpdated: new Date().toISOString() });
+      showToast("Delivery tracking saved!");
+    } catch (err) { showToast("Error saving."); }
+    setIsSaving(false);
+  };
+
+  const updateStatus = async (id, newStatus) => {
+    const updated = deliveries.map(d => d.id === id ? { ...d, status: newStatus, timeUpdated: new Date().toLocaleTimeString() } : d);
+    setDeliveries(updated);
+    if (user) {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'delivery_app', 'main_state'), { deliveries: updated, lastUpdated: new Date().toISOString() }, {merge: true});
+    }
+    showToast(`Order marked as ${newStatus}`);
+  };
+
+  const renderActiveDeliveries = () => {
+    const activeList = deliveries.filter(d => d.status === 'Pending' || d.status === 'On the Way');
+    return (
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
+        <div className="flex justify-between items-center mb-2">
+            <h2 className="text-2xl font-black text-slate-800">Active Deliveries</h2>
+            <div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg font-bold">{activeList.length} Active Orders</div>
+        </div>
+        {activeList.length === 0 ? (
+            <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center text-slate-400"><Truck className="w-12 h-12 mx-auto mb-3 text-slate-300" /><p className="font-medium text-lg text-slate-500">No active deliveries.</p></div>
+        ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {activeList.map(order => (
+                    <div key={order.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                        <div className={`px-4 py-3 border-b flex justify-between items-center ${order.status === 'On the Way' ? 'bg-indigo-50' : 'bg-slate-50'}`}>
+                            <span className="font-black text-slate-700">{order.orderId}</span>
+                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${order.status === 'On the Way' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>{order.status}</span>
+                        </div>
+                        <div className="p-4 flex-1 space-y-3">
+                            <div className="flex items-start gap-2"><User className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /><div><p className="font-bold text-slate-800 text-sm leading-tight">{order.customerName}</p><p className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded mt-1 inline-block">{order.platform}</p></div></div>
+                            <div className="flex items-start gap-2"><Phone className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /><p className="font-medium text-slate-600 text-sm">{order.phone || 'N/A'}</p></div>
+                            <div className="flex items-start gap-2"><MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" /><p className="font-medium text-slate-600 text-sm leading-snug">{order.address}</p></div>
+                            <div className="pt-3 mt-1 border-t border-slate-100 flex justify-between items-center"><span className="text-xs text-slate-400 flex items-center font-medium"><Clock className="w-3 h-3 mr-1"/> {order.timeAdded}</span><span className="font-black text-orange-600 text-lg">₹{parseFloat(order.amount).toFixed(2)}</span></div>
+                        </div>
+                        <div className="p-3 bg-slate-50 border-t border-slate-100 flex gap-2">
+                            {order.status === 'Pending' && <button onClick={() => updateStatus(order.id, 'On the Way')} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"><Navigation className="w-4 h-4"/> Start</button>}
+                            {order.status === 'On the Way' && <button onClick={() => updateStatus(order.id, 'Delivered')} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"><Check className="w-4 h-4"/> Delivered</button>}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderAddDelivery = () => {
+    return (
+      <div className="p-4 sm:p-6 max-w-3xl mx-auto">
+        <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+            <div className="bg-slate-800 px-6 py-5 border-b border-slate-700 flex items-center gap-3">
+                <div className="bg-orange-500 p-2 rounded-lg text-white"><Plus className="w-5 h-5"/></div>
+                <h2 className="text-xl font-bold text-white">New Delivery Task</h2>
+            </div>
+            <div className="p-6 space-y-6">
+                <div className="grid grid-cols-2 gap-6">
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Order ID</label><input type="text" className="w-full rounded-lg border-slate-300 border p-2 outline-none focus:ring-2 focus:ring-orange-500" value={newDelivery.orderId} onChange={(e) => setNewDelivery({...newDelivery, orderId: e.target.value})} /></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Platform</label><select className="w-full rounded-lg border-slate-300 border p-2 outline-none focus:ring-2 focus:ring-orange-500" value={newDelivery.platform} onChange={(e) => setNewDelivery({...newDelivery, platform: e.target.value})}><option>Direct Order</option><option>Swiggy</option><option>Zomato</option></select></div>
+                </div>
+                <div className="grid grid-cols-2 gap-6">
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Customer Name</label><input type="text" className="w-full rounded-lg border-slate-300 border p-2 outline-none focus:ring-2 focus:ring-orange-500" value={newDelivery.customerName} onChange={(e) => setNewDelivery({...newDelivery, customerName: e.target.value})} /></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Phone Number</label><input type="text" className="w-full rounded-lg border-slate-300 border p-2 outline-none focus:ring-2 focus:ring-orange-500" value={newDelivery.phone} onChange={(e) => setNewDelivery({...newDelivery, phone: e.target.value})} /></div>
+                </div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">Delivery Address</label><textarea className="w-full rounded-lg border-slate-300 border p-2 outline-none focus:ring-2 focus:ring-orange-500 resize-none" rows="2" value={newDelivery.address} onChange={(e) => setNewDelivery({...newDelivery, address: e.target.value})} /></div>
+                <div className="grid grid-cols-2 gap-6">
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Driver Name</label><input type="text" className="w-full rounded-lg border-slate-300 border p-2 outline-none focus:ring-2 focus:ring-orange-500" value={newDelivery.driverName} onChange={(e) => setNewDelivery({...newDelivery, driverName: e.target.value})} /></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">Amount (₹)</label><input type="number" className="w-full rounded-lg border-slate-300 border p-2 outline-none focus:ring-2 focus:ring-orange-500" value={newDelivery.amount} onChange={(e) => setNewDelivery({...newDelivery, amount: e.target.value})} /></div>
+                </div>
+                <button onClick={async () => { if(!newDelivery.customerName) return; const updated = [{...newDelivery, id: Date.now(), amount: parseFloat(newDelivery.amount)||0, status: 'Pending', timeAdded: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}, ...deliveries]; setDeliveries(updated); if(user){ await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'delivery_app', 'main_state'), { deliveries: updated, lastUpdated: new Date().toISOString() }, {merge: true}); } showToast("Task Added"); setNewDelivery({orderId: generateOrderId(), customerName:'', phone:'', address:'', platform:'Direct Order', amount:'', driverName:''}); }} className="w-full bg-orange-600 hover:bg-orange-700 text-white py-3 rounded-lg font-bold mt-4">Create Task</button>
+            </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHistory = () => {
+    return (
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-slate-800 px-6 py-5"><h2 className="text-xl font-bold text-white flex items-center gap-2"><History className="w-5 h-5 text-orange-400" /> Completed Deliveries</h2></div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[800px]">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs uppercase">
+                <tr>
+                  <th className="p-4">ID / Time</th>
+                  <th className="p-4">Customer</th>
+                  <th className="p-4">Address</th>
+                  <th className="p-4 text-center">Driver Name</th>
+                  <th className="p-4 text-right">Amount</th>
+                  <th className="p-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deliveries.filter(d => d.status === 'Delivered').map((order) => (
+                  <tr key={order.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="p-4"><div className="font-bold text-slate-800">{order.orderId}</div><div className="text-xs text-slate-500">{order.timeUpdated}</div></td>
+                    <td className="p-4"><div className="font-bold text-slate-700">{order.customerName}</div><div className="text-xs text-slate-500">{order.phone}</div></td>
+                    <td className="p-4 text-sm text-slate-600 max-w-[200px] truncate" title={order.address}>{order.address}</td>
+                    <td className="p-4 text-center text-sm font-medium">{order.driverName || '-'}</td>
+                    <td className="p-4 text-right font-bold text-slate-800">₹{parseFloat(order.amount).toFixed(2)}</td>
+                    <td className="p-4 text-right"><button onClick={async () => { const up = deliveries.filter(d => d.id !== order.id); setDeliveries(up); if(user){ await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'delivery_app', 'main_state'), { deliveries: up, lastUpdated: new Date().toISOString() }, {merge:true}); } showToast("Deleted."); }} className="text-red-400 hover:text-red-600 p-2"><Trash2 className="w-4 h-4"/></button></td>
+                  </tr>
+                ))}
+                {deliveries.filter(d => d.status === 'Delivered').length === 0 && (
+                    <tr><td colSpan={6} className="p-12 text-center text-slate-400 italic">No completed deliveries yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex-1 flex flex-col h-full overflow-auto">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shrink-0">
+        <div className="px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between h-auto py-3 gap-4">
+            <nav className="flex gap-1 w-full sm:w-auto overflow-x-auto justify-center sm:justify-start">
+              <button onClick={() => setActiveTab('active')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'active' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><MapPin className="w-4 h-4"/> Active</button>
+              <button onClick={() => setActiveTab('add')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'add' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><Plus className="w-4 h-4"/> Add Task</button>
+              <button onClick={() => setActiveTab('history')} className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeTab === 'history' ? 'bg-orange-50 text-orange-700' : 'text-slate-600 hover:bg-slate-50'}`}><History className="w-4 h-4"/> History</button>
+            </nav>
+            <button onClick={handleSaveToCloud} disabled={isSaving} className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg"><Save className="w-4 h-4"/> {isSaving ? '...' : 'Sync Data'}</button>
+        </div>
+      </header>
+      <div className="flex-1">
+        {activeTab === 'active' && renderActiveDeliveries()}
+        {activeTab === 'add' && renderAddDelivery()}
+        {activeTab === 'history' && renderHistory()}
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// MAIN APP WRAPPER (SIDEBAR + CONTENT)
+// ==========================================
+const App = () => {
+  const [activeModule, setActiveModule] = useState('invoice'); 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState(null);
+  const [toastMessage, setToastMessage] = useState('');
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+        else await signInAnonymously(auth);
+      } catch (err) { console.error(err); }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  return (
+    <div className="flex h-screen bg-slate-100 font-sans text-slate-900 overflow-hidden">
+      
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-3 rounded-lg shadow-lg z-50 flex items-center gap-3 animate-bounce print:hidden">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            <span className="font-medium text-sm">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Mobile Sidebar Overlay */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* Main Sidebar */}
+      <aside className={`fixed lg:static top-0 left-0 h-full w-64 bg-slate-900 text-white z-50 flex flex-col transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} print:hidden`}>
+        <div className="p-6 border-b border-slate-800 flex items-center gap-3">
+          <div className="flex items-center justify-center w-10 h-10 bg-orange-500 rounded-full border-2 border-orange-600 shadow-md relative text-white shrink-0">
+            <span className="absolute top-[2px] text-[5px] font-black tracking-widest uppercase">Quick</span>
+            <span className="absolute bottom-[2px] text-[5px] font-black tracking-widest uppercase">Box</span>
+            <Truck className="w-5 h-5 mb-0.5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-black tracking-tight leading-none text-white">QUICK BOX</h1>
+            <h2 className="text-[10px] font-bold text-orange-500 tracking-widest uppercase">Management</h2>
+          </div>
+        </div>
+
+        <nav className="flex-1 px-4 py-6 space-y-2">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">Dashboards</div>
+          
+          <button 
+            onClick={() => { setActiveModule('kitchen'); setSidebarOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-colors ${activeModule === 'kitchen' ? 'bg-orange-500 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+          >
+            <ChefHat className="w-5 h-5" /> Kitchen Costing
+          </button>
+          
+          <button 
+            onClick={() => { setActiveModule('invoice'); setSidebarOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-colors ${activeModule === 'invoice' ? 'bg-orange-500 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+          >
+            <Receipt className="w-5 h-5" /> Billing & Invoices
+          </button>
+          
+          <button 
+            onClick={() => { setActiveModule('delivery'); setSidebarOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-colors ${activeModule === 'delivery' ? 'bg-orange-500 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+          >
+            <MapPin className="w-5 h-5" /> Delivery Tracker
+          </button>
+        </nav>
+
+        <div className="p-6 border-t border-slate-800 bg-slate-900/50">
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
+             <Store className="w-4 h-4 text-emerald-500"/>
+             System Status: <span className="text-emerald-500 font-bold">Online</span>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main App Content Area */}
+      <main className="flex-1 flex flex-col h-screen overflow-hidden min-w-0 relative bg-slate-100">
+        {/* Mobile Header */}
+        <div className="lg:hidden bg-slate-900 text-white p-4 flex justify-between items-center print:hidden shrink-0">
+            <div className="flex items-center gap-2 font-black text-lg"><Truck className="w-5 h-5 text-orange-500"/> QUICK BOX</div>
+            <button onClick={() => setSidebarOpen(true)} className="p-2 bg-slate-800 rounded-lg"><Menu className="w-5 h-5"/></button>
+        </div>
+
+        {/* Modules loaded via CSS hidden classes to preserve UI state when switching tabs */}
+        <div className={`flex-1 overflow-hidden ${activeModule === 'kitchen' ? 'flex flex-col' : 'hidden'}`}>
+            <KitchenModule user={user} showToast={showToast} />
+        </div>
+        <div className={`flex-1 overflow-hidden ${activeModule === 'invoice' ? 'flex flex-col' : 'hidden'}`}>
+            <InvoiceModule user={user} showToast={showToast} />
+        </div>
+        <div className={`flex-1 overflow-hidden ${activeModule === 'delivery' ? 'flex flex-col' : 'hidden'}`}>
+            <DeliveryModule user={user} showToast={showToast} />
+        </div>
+      </main>
+
+    </div>
+  );
+};
+
+export default App;
